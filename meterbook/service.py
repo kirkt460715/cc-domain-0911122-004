@@ -8,6 +8,7 @@ from meterbook.audit import checks, explanations, anomalies
 from meterbook.ports import files, bundles, receipts, transfer, mapping
 from meterbook.audit import closing, verification
 from meterbook.settlement import reviews
+from meterbook.collection.collector import Collector
 
 
 class Meterbook:
@@ -24,6 +25,7 @@ class Meterbook:
         self.imports = mapping.Imports(self.store)
         self.statements = closing.Statements(self.store)
         self.reviews = reviews.Reviews(self.store)
+        self._collector = None
         self.routes = {}
         modules = {
             'contract': registry, 'rate': rates, 'event': receiver,
@@ -49,9 +51,18 @@ class Meterbook:
             for name, method in inspect.getmembers(service, inspect.ismethod):
                 if not name.startswith('_'):
                     self.routes[prefix + '.' + name] = (method, False)
+        for name, method in inspect.getmembers(self.collector, inspect.ismethod):
+            if not name.startswith('_') and name != 'run':
+                self.routes['collect.' + name] = (method, False)
 
     def close(self):
         self.store.close()
+
+    @property
+    def collector(self):
+        if self._collector is None:
+            self._collector = Collector(self.store)
+        return self._collector
 
     def __enter__(self):
         return self

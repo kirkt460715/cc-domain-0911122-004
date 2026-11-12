@@ -5,6 +5,7 @@ from pathlib import Path
 from meterbook.service import Meterbook
 from meterbook.values import loads, canonical, MeterError, reject
 from meterbook.ports import files
+from meterbook.collection.client import QueueClient
 
 
 def read_json(path):
@@ -41,6 +42,45 @@ def replay(app, fixture):
     return {'ok': True, 'steps': results, 'checks': report}
 
 
+def run_collect(app, arguments):
+    collector = app.collector
+    action = arguments.action
+    if action == 'status':
+        return collector.status()
+    if action == 'pause':
+        return collector.pause()
+    if action == 'resume':
+        return collector.resume()
+    if action == 'runs':
+        return {'runs': collector.runs()}
+    if action == 'deliveries':
+        return {'deliveries': collector.list_deliveries(state=arguments.state)}
+    if action == 'quarantine':
+        return {'quarantine': collector.list_quarantine()}
+    if action == 'configure':
+        options = {}
+        if arguments.quarantine_ack is not None:
+            options['quarantine_ack'] = arguments.quarantine_ack
+        if arguments.renew_threshold is not None:
+            options['renew_threshold'] = arguments.renew_threshold
+        if arguments.renew_limit is not None:
+            options['renew_limit'] = arguments.renew_limit
+        if not options:
+            reject('collector_config', 'configure requires at least one setting')
+        return collector.configure(**options)
+    if action == 'run':
+        if not arguments.source:
+            reject('collector_source', 'collect run requires --source QUEUE_URL')
+        source = QueueClient(arguments.source)
+        kwargs = {}
+        for name in ('limit', 'max_attempts', 'max_messages', 'deadline'):
+            value = getattr(arguments, name)
+            if value is not None:
+                kwargs[name] = value
+        return collector.run(source, **kwargs)
+    reject('collector_action', 'Unsupported collect action', action=action)
+
+
 def parser():
     result = argparse.ArgumentParser(prog='meterbook', description='Local bilateral data-usage settlement ledger')
     result.add_argument('--database', default=':memory:')
@@ -61,6 +101,18 @@ def parser():
     export.add_argument('invoice_id')
     export.add_argument('--format', choices=['json', 'csv'], default='json')
     commands.add_parser('check')
+    collect = commands.add_parser('collect')
+    collect.add_argument('action', choices=['run', 'pause', 'resume', 'status',
+                                             'deliveries', 'quarantine', 'runs', 'configure'])
+    collect.add_argument('--source')
+    collect.add_argument('--limit', type=int)
+    collect.add_argument('--max-attempts', type=int, dest='max_attempts')
+    collect.add_argument('--max-messages', type=int, dest='max_messages')
+    collect.add_argument('--deadline', type=float)
+    collect.add_argument('--quarantine-ack', dest='quarantine_ack', action='store_true', default=None)
+    collect.add_argument('--renew-threshold', type=int, dest='renew_threshold')
+    collect.add_argument('--renew-limit', type=int, dest='renew_limit')
+    collect.add_argument('--state')
     return result
 
 
@@ -86,6 +138,11 @@ def main(argv=None):
             elif arguments.command == 'check':
                 result = app.execute({'operation': 'check.check'})
                 if not result['ok']:
+                    print(canonical(result))
+                    return 1
+            elif arguments.command == 'collect':
+                result = run_collect(app, arguments)
+                if arguments.action == 'run' and result.get('stop_reason') not in ('drained',):
                     print(canonical(result))
                     return 1
             else:

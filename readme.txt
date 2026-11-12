@@ -22,3 +22,7 @@ python3 -m compileall -q meterbook
 ## 本地来源
 
 lab/ 提供独立的合作方协议或合成文档发生器，不连接生产服务。协议、样本含义和操作见 docs/来源协议.md。运行 python3 -m lab.demo 可查看来源行为，python3 -m lab.check 依次执行测试、语法检查、业务演示和来源演示。HTTP 服务默认绑定回环地址，测试使用自动分配端口并在结束时清理。
+
+## 队列采集器
+
+meterbook/collection 主动从用量投递队列拉取事件，将“拿到投递、业务接收、向供应商确认”三段分别可靠落盘，支持续租、失租重投、暂停恢复、隔离坏信封与冲突保留，设计与命令见 docs/队列采集器.md。入口为 python3 -m meterbook --database ledger.sqlite collect run --source http://127.0.0.1:8765，采集状态可用 collect status|deliveries|quarantine|runs 查询。
